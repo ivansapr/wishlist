@@ -1,0 +1,15 @@
+import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
+import { error, type RequestEvent } from '@sveltejs/kit';
+import { one, run } from './db';
+import type { User } from '#lib/types';
+export const now = () => new Date().toISOString();
+export const secret = () => randomBytes(32).toString('base64url');
+export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+export function passwordHash(password: string) { const salt = randomBytes(16).toString('hex'); return `${salt}:${scryptSync(password,salt,64).toString('hex')}`; }
+export function passwordValid(password: string, stored: string) { const [salt,key]=stored.split(':'); return timingSafeEqual(scryptSync(password,salt,64),Buffer.from(key,'hex')); }
+export function setSession(event: RequestEvent, userId: string) { const token=secret(); run('DELETE FROM sessions WHERE expires<?',Date.now()); run('INSERT INTO sessions VALUES (?,?,?)',hash(token),userId,Date.now()+30*86400000); event.cookies.set('session',token,{path:'/',httpOnly:true,sameSite:'lax',secure:event.url.protocol==='https:',maxAge:30*86400}); }
+export function userFromSession(event: RequestEvent) { const token=event.cookies.get('session'); return token ? one<User>('SELECT u.id,u.email,u.name,u.currency FROM users u JOIN sessions s ON u.id=s.user_id WHERE s.hash=? AND s.expires>?',hash(token),Date.now()) : undefined; }
+export type Actor = { userId: string; write: boolean; folderId: string | null };
+export function actor(event: RequestEvent, write=false): Actor { const bearer=event.request.headers.get('authorization'); if (bearer?.startsWith('Bearer ')) { const token=one<{user_id:string;permission:string;folder_id:string|null}>('SELECT * FROM tokens WHERE hash=?',hash(bearer.slice(7))); if (!token) error(401,'Invalid or revoked connection token.'); if(write&&token.permission!=='write') error(403,'This connection is read-only.'); return {userId:token.user_id,write:token.permission==='write',folderId:token.folder_id}; } if(!event.locals.user) error(401,'Sign in to continue.'); return {userId:event.locals.user.id,write:true,folderId:null}; }
+export function sessionUser(event: RequestEvent) { if(!event.locals.user) error(401,'Sign in to continue.'); return event.locals.user; }
+export function rateLimit(key: string, limit=20, interval=600000) { const k=hash(key),time=Date.now(); run('DELETE FROM rate_limits WHERE reset<?',time); run('INSERT INTO rate_limits VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1',k,time+interval); const row=one<{count:number}>('SELECT count FROM rate_limits WHERE key=?',k)!; if(row.count>limit) error(429,'Too many attempts. Please try again later.'); }

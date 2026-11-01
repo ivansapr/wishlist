@@ -1,0 +1,7 @@
+export type User = { id: string; email: string; name: string; currency: string };
+export type Folder = { id: string; name: string; count: number; shared: number };
+export type Price = { id: string; amount: number; currency: string; merchant: string; source_url: string; observed_at: string; recorded_at: string; deal: string; expires_at: string | null; shipping: string };
+export type Item = { id: string; folder_id: string; title: string; source_url: string; notes: string; description: string; style: 'stamp'|'sticker'|'object'; size: 'small'|'medium'|'large'; asset_id: string | null; revision: number; created_at: string; deleted_at: string | null; prices: Price[]; artwork?: string };
+export function money(amount: number, currency: string) { const f = new Intl.NumberFormat('en', {style:'currency', currency}); return f.format(amount / 10 ** (f.resolvedOptions().maximumFractionDigits ?? 2)); }
+export function minorUnits(value: string, currency: string) { const digits = new Intl.NumberFormat('en', {style:'currency',currency}).resolvedOptions().maximumFractionDigits ?? 2; const n=Number(value)*10**digits; if (!Number.isFinite(n) || n<0 || !Number.isSafeInteger(Math.round(n)) || Math.abs(n-Math.round(n))>0.00001) throw new Error('Enter a valid price with the correct number of decimal places.'); return Math.round(n); }
+export function latestPrice(item: Item) { return item.prices.find(p => !p.expires_at || Date.parse(p.expires_at)>Date.now()); }

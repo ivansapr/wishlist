@@ -1,0 +1,10 @@
+import { DatabaseSync } from 'node:sqlite';
+import { access } from 'node:fs/promises';
+import { join,resolve } from 'node:path';
+const dir=resolve(process.argv[2]||'data');
+const db=new DatabaseSync(join(dir,'wishlist.sqlite'),{readOnly:true});
+const integrity=db.prepare('PRAGMA integrity_check').get();
+if(Object.values(integrity)[0]!=='ok')throw new Error('Database integrity check failed.');
+if(db.prepare('PRAGMA foreign_key_check').all().length)throw new Error('Foreign key check failed.');
+for(const {id} of db.prepare('SELECT id FROM assets').all())await access(join(dir,'assets',id+'.webp'));
+db.close();console.log('Database integrity, ownership references and asset files verified.');

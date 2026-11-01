@@ -1,0 +1,16 @@
+services:
+  wishlist:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      RP_ID: ${RP_ID:-localhost}
+      DATA_DIR: /data
+      BODY_SIZE_LIMIT: 6M
+    volumes:
+      - wishlist-data:/data
+    stop_grace_period: 15s
+volumes:
+  wishlist-data:
