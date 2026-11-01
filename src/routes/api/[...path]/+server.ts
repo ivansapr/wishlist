@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { actor,sessionUser,hash,now,secret } from '#lib/server/auth';
 import { all,one,run,transaction } from '#lib/server/db';
 import { createFolder,createItem,deleteItem,folders,items,parse,recordPrice,renameFolder,restoreItem,updateItem,folderAccess,currency,idempotent } from '#lib/server/store';
+import { connections } from '#lib/server/oauth';
 import { uploadAsset } from '#lib/server/assets';
 const revision=z.number().int().positive();
 const handler:RequestHandler=async e=>{
@@ -13,7 +14,7 @@ const handler:RequestHandler=async e=>{
  if(method==='GET'){
   if(resource==='state'){const offset=parse(z.coerce.number().int().min(0).max(100000),e.url.searchParams.get('offset')||0);const folder=e.url.searchParams.get('folder')||undefined;const query=parse(z.string().max(160),e.url.searchParams.get('q')||'');const list=items(a,folder,offset,100,false,query);return json({folders:folders(a),items:list,offset,hasMore:list.length===100});}
   if(resource==='trash')return json(items(a,undefined,0,100,true));
-  if(resource==='profile'){const u=sessionUser(e);return json({user:u,keys:all('SELECT id,name,created_at FROM passkeys WHERE user_id=?',u.id),tokens:all('SELECT id,name,permission,folder_id,created_at FROM tokens WHERE user_id=?',u.id),sessions:all<{hash:string;expires:number}>('SELECT hash,expires FROM sessions WHERE user_id=? AND expires>?',u.id,Date.now()).map(s=>({id:s.hash,expires:s.expires,current:s.hash===hash(e.cookies.get('session')||'')}))});}
+  if(resource==='profile'){const u=sessionUser(e);return json({user:u,oauth:connections(u.id),keys:all('SELECT id,name,created_at FROM passkeys WHERE user_id=?',u.id),tokens:all('SELECT id,name,permission,folder_id,created_at FROM tokens WHERE user_id=?',u.id),sessions:all<{hash:string;expires:number}>('SELECT hash,expires FROM sessions WHERE user_id=? AND expires>?',u.id,Date.now()).map(s=>({id:s.hash,expires:s.expires,current:s.hash===hash(e.cookies.get('session')||'')}))});}
   error(404,'Not found.');
  }
  const body:any=method==='DELETE'?{}:parse(z.record(z.string(),z.unknown()),await e.request.json().catch(()=>error(400,'Invalid JSON.')));
@@ -30,6 +31,7 @@ const handler:RequestHandler=async e=>{
  }
  if(resource==='prices'&&method==='POST')return json(idempotent(a,e.request.headers.get('idempotency-key')||undefined,{op:'price',body},()=>recordPrice(a,body)));
  if(resource==='profile'&&method==='PATCH'){const user=sessionUser(e);const v=parse(z.object({name:z.string().trim().min(1).max(100),currency}).strict(),body);run('UPDATE users SET name=?,currency=? WHERE id=?',v.name,v.currency,user.id);return json({ok:true});}
+ if(resource==='oauth-grants'&&method==='DELETE'&&id){const user=sessionUser(e);run('UPDATE oauth_grants SET revoked=1 WHERE id=? AND user_id=?',id,user.id);return json({ok:true});}
  if(resource==='tokens'){
   const user=sessionUser(e);
   if(method==='DELETE'&&id){run('DELETE FROM tokens WHERE id=? AND user_id=?',id,user.id);return json({ok:true});}

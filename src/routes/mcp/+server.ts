@@ -2,11 +2,11 @@ import { json, isHttpError, type RequestHandler } from '@sveltejs/kit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { challengeHeader } from '#lib/server/oauth';
 import { actor, rateLimit } from '#lib/server/auth';
 import { folders,createFolder,renameFolder,items,getItem,createItem,updateItem,deleteItem,restoreItem,prices,recordPrice,itemFields,itemChanges,priceFields,idempotent } from '#lib/server/store';
 export const POST:RequestHandler=async e=>{
- if(!e.request.headers.get('authorization')?.startsWith('Bearer '))return json({error:'A connection bearer token is required.'},{status:401,headers:{'WWW-Authenticate':'Bearer'}});
- const a=actor(e);rateLimit(`mcp:${a.userId}`,120,60000);
+ const a=authenticate(e);if(a instanceof Response)return a;rateLimit(`mcp:${a.userId}`,120,60000);
  const server=new McpServer({name:'wishlist',version:'0.1.0'},{instructions:'Wishlist stores user collections. You perform shopping research and image generation yourself. Never invent prices: record dated sources. Generate transparent PNG/WebP artwork in the item style without text or prices. Upload binary bytes to the authenticated endpoint returned by prepare_asset_upload, then attach its returned asset ID. No server-side research or generation is available.'});
  const register=(name:string,description:string,schema:z.ZodRawShape,fn:(v:any)=>unknown,write=false)=>server.registerTool(name,{description,inputSchema:schema,annotations:{readOnlyHint:!write,destructiveHint:name==='delete_item',openWorldHint:false}},async v=>{try{const result=await fn(v);return{content:[{type:'text' as const,text:JSON.stringify(result)}]};}catch(err){return{isError:true,content:[{type:'text' as const,text:JSON.stringify({error:isHttpError(err)?err.body.message:'The operation could not be completed.',status:isHttpError(err)?err.status:500})}]};}});
  const id=z.string().min(1),key=z.string().min(1).max(200).optional(),revision=z.number().int().positive();
@@ -28,4 +28,5 @@ export const POST:RequestHandler=async e=>{
  await server.connect(transport);
  try {const response=await transport.handleRequest(e.request);const bytes=await response.arrayBuffer();return new Response(bytes,{status:response.status,headers:response.headers});}finally{await server.close();}
 };
-export const GET:RequestHandler=()=>json({error:'This stateless MCP server accepts POST requests.'},{status:405,headers:{Allow:'POST'}});
+function authenticate(e:Parameters<RequestHandler>[0]){if(!e.request.headers.get('authorization')?.startsWith('Bearer '))return json({error:'OAuth authorization or a connection token is required.'},{status:401,headers:{'WWW-Authenticate':challengeHeader(e)}});try{return actor(e);}catch(err){if(isHttpError(err)&&err.status===401)return json({error:'invalid_token'},{status:401,headers:{'WWW-Authenticate':challengeHeader(e,true)}});throw err;}}
+export const GET:RequestHandler=e=>{const a=authenticate(e);return a instanceof Response?a:json({error:'This stateless MCP server accepts POST requests.'},{status:405,headers:{Allow:'POST'}});};

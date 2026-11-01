@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 export const dataDir = resolve(process.env.DATA_DIR || 'data');
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 export const db = new DatabaseSync(resolve(dataDir, 'wishlist.sqlite'));
+const schemaVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
+if (schemaVersion > 2) throw new Error('This database needs a newer version of Wishlist.');
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR', password TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
@@ -19,7 +21,20 @@ CREATE TABLE IF NOT EXISTS mutations (user_id TEXT NOT NULL, key TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS items_folder ON items(folder_id,deleted_at);
 CREATE INDEX IF NOT EXISTS prices_item ON prices(item_id,observed_at);
-PRAGMA user_version=1;`);
+`);
+// Additive version-two migration preserves existing accounts, items and manual tokens.
+db.exec(`BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, metadata TEXT NOT NULL, secret_hash TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_requests (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, state TEXT, scopes TEXT NOT NULL, resource TEXT NOT NULL, browser_hash TEXT NOT NULL, user_id TEXT REFERENCES users(id), expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_grants (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), user_id TEXT NOT NULL REFERENCES users(id), folder_id TEXT, scopes TEXT NOT NULL, resource TEXT NOT NULL, created_at TEXT NOT NULL, expires INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(folder_id,user_id) REFERENCES folders(id,user_id));
+CREATE TABLE IF NOT EXISTS oauth_codes (hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL REFERENCES oauth_grants(id), redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS oauth_access_tokens (hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL REFERENCES oauth_grants(id), scopes TEXT NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL REFERENCES oauth_grants(id), scopes TEXT NOT NULL, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS oauth_grants_user ON oauth_grants(user_id,revoked);
+CREATE INDEX IF NOT EXISTS oauth_access_grant ON oauth_access_tokens(grant_id);
+CREATE INDEX IF NOT EXISTS oauth_refresh_grant ON oauth_refresh_tokens(grant_id);
+PRAGMA user_version=2;
+COMMIT;`);
 export function one<T = Record<string, unknown>>(sql: string, ...args: (string | number | null)[]): T | undefined { return db.prepare(sql).get(...args) as T | undefined; }
 export function all<T = Record<string, unknown>>(sql: string, ...args: (string | number | null)[]): T[] { return db.prepare(sql).all(...args) as T[]; }
 export function run(sql: string, ...args: (string | number | null)[]) { return db.prepare(sql).run(...args); }

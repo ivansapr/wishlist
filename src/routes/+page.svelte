@@ -12,7 +12,7 @@
  let folders=$state<Folder[]>(untrack(()=>data.folders)),items=$state<Item[]>(untrack(()=>data.items)),hasMore=$state(untrack(()=>data.hasMore));
  let view=$state('all'),navOpen=$state(false),query=$state(''),message=$state(''),busy=$state(false);
  let editor=$state(false),editing=$state<Item|null>(null),folderDialog=$state(false),folderName=$state(''),renaming=$state(false),shareDialog=$state(false),shareUrl=$state(''),trash=$state<Item[]>([]);
- let signup=$state(true),email=$state(''),password=$state(''),name=$state(''),authMessage=$state('');
+ let signup=$state(untrack(()=>!data.oauthRequest)),email=$state(''),password=$state(''),name=$state(''),authMessage=$state('');
  const current=$derived(folders.find(f=>f.id===view));
  const visible=$derived(items.filter(i=>(view==='all'||i.folder_id===view)&&(!query||i.title.toLowerCase().includes(query.toLowerCase()))));
  const title=$derived(current?.name||'All the things');
@@ -21,8 +21,9 @@
  async function refresh(){const version=++loadVersion;const next=await api(statePath());if(version!==loadVersion)return;folders=next.folders;items=next.items;hasMore=next.hasMore;await invalidateAll();}
  function search(){clearTimeout(searchTimer);searchTimer=setTimeout(()=>refresh().catch(e=>message=e.message),250);}
  async function more(){try{const next=await api(statePath(items.length));items=[...items,...next.items];hasMore=next.hasMore;}catch(e){message=(e as Error).message;}}
- async function auth(e:SubmitEvent){e.preventDefault();busy=true;authMessage='';try{await api('auth/'+(signup?'register':'login'),'POST',signup?{email,password,name}:{email,password});await refresh();}catch(e){authMessage=(e as Error).message;}finally{busy=false;}}
- async function usePasskey(){busy=true;authMessage='';try{if(signup&&(!email||!name)){authMessage='Enter your name and email first, then create your passkey.';return;}await passkey(signup?'register':'login',signup?{email,name}:undefined);await refresh();}catch(e){authMessage=(e as Error).name==='NotAllowedError'?'Passkey request cancelled. You can try again.':(e as Error).message;}finally{busy=false;}}
+ function resumeOAuth(){if(!data.oauthRequest)return false;location.assign('/oauth/authorize?request='+encodeURIComponent(data.oauthRequest));return true;}
+ async function auth(e:SubmitEvent){e.preventDefault();busy=true;authMessage='';try{await api('auth/'+(signup?'register':'login'),'POST',signup?{email,password,name}:{email,password});if(!resumeOAuth())await refresh();}catch(e){authMessage=(e as Error).message;}finally{busy=false;}}
+ async function usePasskey(){busy=true;authMessage='';try{if(signup&&(!email||!name)){authMessage='Enter your name and email first, then create your passkey.';return;}await passkey(signup?'register':'login',signup?{email,name}:undefined);if(!resumeOAuth())await refresh();}catch(e){authMessage=(e as Error).name==='NotAllowedError'?'Passkey request cancelled. You can try again.':(e as Error).message;}finally{busy=false;}}
  async function signout(){await api('auth/logout','POST',{});location.href='/';}
  function navigate(next:string){view=next;query='';navOpen=false;message='';if(next!=='trash'&&next!=='profile'&&next!=='connections')refresh().catch(e=>message=e.message);if(next==='trash')api('trash').then(v=>trash=v).catch(e=>message=e.message);}
  async function saveFolder(e:SubmitEvent){e.preventDefault();busy=true;message='';try{const f=await api('folders'+(renaming?'/'+view:''),renaming?'PATCH':'POST',{name:folderName});await refresh();view=f.id;folderDialog=false;}catch(e){message=(e as Error).message;}finally{busy=false;}}

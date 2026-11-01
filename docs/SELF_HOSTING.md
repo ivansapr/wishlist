@@ -4,7 +4,7 @@
 
 Use Docker Compose as shown in the README. The app runs as the unprivileged Node user. `/data` stores `wishlist.sqlite`, its WAL files, and immutable artwork in `assets/`. Mount it on local persistent storage, with a single application replica. A reverse proxy should terminate HTTPS. The runtime entrypoint sets internal origin headers from `ORIGIN`, so it does not trust client-supplied host/protocol forwarding headers. The configured `ORIGIN` is the canonical browser origin and WebAuthn expected origin; `RP_ID` is its domain only.
 
-SQLite enables foreign keys, WAL and a five-second busy timeout. Schema version one is created on startup; this initial release has no upgrade migrations beyond that baseline. Back up before installing future versions.
+SQLite enables foreign keys, WAL and a five-second busy timeout. Schema version two is created on startup. The additive v1-to-v2 migration introduces OAuth clients, pending requests, grants, codes and tokens without changing existing accounts, items or personal tokens. A newer unsupported schema version is rejected. Back up before installing future versions.
 
 Auth attempts and uploads are rate-limited in SQLite. Behind a reverse proxy, configure adapter-node's `ADDRESS_HEADER` only if the proxy reliably overwrites that header and direct public access to the app port is blocked. Otherwise clients may share the proxy's IP rate limit. Do not trust client-provided forwarding headers directly.
 
@@ -41,9 +41,15 @@ Stop the application. Preserve the old volume as a rollback copy. Restore the sn
 
 Do not restore over a live database. Restore deliberately from a known snapshot: newly added records after that snapshot will not be present.
 
+## OAuth hosting
+
+No new environment variables are required. OAuth metadata and audience checks use `ORIGIN`; set it to your public HTTPS origin without a path or trailing slash. Keep it stable across restarts. Use the supplied server entrypoint (`npm start`, also used by Docker) so canonical-origin handling and cookie-independent token-form requests work correctly. Do not replace it with `node build`.
+
+No upstream identity service, SMTP service or global OAuth secret is required. Existing Wishlist password/passkey accounts approve access. Clients dynamically register exact redirect URIs and receive their own identifiers. Registrations, grants, token hashes and refresh-reuse records survive restarts and are included in SQLite backups. Revoke unwanted grants in Connect AI. A restored older backup also restores its earlier revocation state, so review/revoke connections after a rollback.
+
 ## Authentication boundaries
 
-Passwords use salted scrypt hashes. Session cookies are HttpOnly, SameSite=Lax, and Secure on HTTPS. Session tokens, public link tokens and MCP tokens are stored hashed. Passkeys use required user verification and expiring, single-use challenges. Sessions expire after 30 days. Password changes revoke other sessions. Removing the final passkey is refused if there is no password.
+Passwords use salted scrypt hashes. Session cookies are HttpOnly, SameSite=Lax, and Secure on HTTPS. Session tokens, public link tokens, personal MCP tokens, OAuth codes/access/refresh tokens and confidential-client secrets are stored hashed. Passkeys use required user verification and expiring, single-use challenges. Sessions expire after 30 days. Password changes revoke other sessions. Removing the final passkey is refused if there is no password.
 
 Email verification and email-based account recovery are not implemented. For a personal deployment, use a second passkey or keep a password; do not rely on future email recovery. Public deployments allow account registration; registration is not currently invite-gated. Public folder links are unlisted/noindex and read-only, but anyone receiving a live link can view or copy its public content. Revocation prevents future app access, not copies already saved by a viewer.
 

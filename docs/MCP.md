@@ -1,8 +1,33 @@
 # Wishlist MCP
 
-Endpoint: `POST /mcp`, Streamable HTTP, stateless JSON responses. Uses the official Model Context Protocol TypeScript SDK. Clients must support `Authorization: Bearer <token>` and accept `application/json, text/event-stream`.
+Endpoint: `POST /mcp`, Streamable HTTP, stateless JSON responses. Uses the official Model Context Protocol TypeScript SDK. Clients accept `application/json, text/event-stream` and authenticate with OAuth access tokens or existing personal connection tokens.
 
-Every request resolves the current token from SQLite. Revocation takes effect on the next request. Public sharing tokens cannot authenticate MCP. Browser sessions alone do not authenticate `/mcp`. Cross-origin browser requests are rejected. No permissive CORS is enabled.
+## OAuth connection
+
+Point an OAuth-capable MCP client at `https://wishlist.example.com/mcp`. Unauthenticated requests return 401 with a `WWW-Authenticate` protected-resource metadata URL. The client discovers this app's authorization server, registers its redirect URIs, then opens Wishlist for sign-in and consent. The owner chooses read-only/edit access and all folders or one folder. The consent page shows the client-supplied name, actual return origin and signed-in account; names are not independently verified.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/.well-known/oauth-protected-resource/mcp` | RFC 9728 resource metadata; root variant also available |
+| `/.well-known/oauth-authorization-server` | RFC 8414 authorization server metadata |
+| `/oauth/register` | RFC 7591 dynamic client registration (JSON) |
+| `/oauth/authorize` | Browser sign-in and explicit consent |
+| `/oauth/token` | Authorization code exchange and refresh (form encoded) |
+| `/oauth/revoke` | RFC 7009 connection revocation (form encoded) |
+
+Only authorization-code flow with mandatory S256 PKCE is supported. Redirect URIs must match registration exactly and use HTTPS, or HTTP loopback for local clients. Wildcards, credentials and fragments are refused. A browser-bound, expiring authorization request survives password/passkey sign-in; changing accounts cannot reuse another account's consent. Cancel returns `access_denied` and preserves the client's state. Successful redirects include the issuer (`iss`).
+
+Scopes are `wishlist:read` and `wishlist:write`; write includes read. A client can request both, and the owner can reduce access before granting it. Without a requested scope the consent page offers both, with explicit owner approval required. The resource indicator is the canonical `${ORIGIN}/mcp`; a supplied different resource is rejected. For compatibility, omission binds to that same resource. Access tokens are checked against the stored audience and current server origin.
+
+Access tokens last at most one hour. Refresh tokens rotate on every successful refresh. Reusing a consumed refresh token revokes the entire connection, including its outstanding access tokens. Grants expire after 30 days and then need consent again. Refresh can reduce scopes but cannot increase them or change the granted folder. Authorization codes last three minutes and are single-use; replay with valid client/redirect/PKCE revokes the grant. Token/code secrets are stored hashed.
+
+Public clients register `token_endpoint_auth_method=none`. If omitted, registration defaults to `client_secret_basic`. Confidential clients can use `client_secret_post` or `client_secret_basic`; secrets are returned once, stored hashed and checked against the registered authentication method. The app has no global OAuth signing/client secret to configure: opaque tokens and registrations live in SQLite.
+
+The owner can revoke a grant under **Connect AI → OAuth connections**. The protocol revocation endpoint invalidates that entire connection; unknown tokens return success and one client cannot revoke another client's connection. Browser sessions alone never authenticate MCP. Existing manually created connection tokens remain supported.
+
+OAuth protocol endpoints, discovery and MCP support CORS without credentialed browser cookies. Account and consent mutations keep same-origin checks. The supplied `npm start` / Docker entrypoint normalizes only cookie-independent OAuth protocol POSTs for SvelteKit's form-origin gate; keep that entrypoint when self-hosting. No authorization request can grant account, sharing or connection-management access.
+
+Tested with the official MCP SDK for discovery, dynamic registration, exchange, refresh and tool calls. OAuth client metadata document URLs (CIMD), external identity providers, OpenID Connect, implicit flow, client credentials grants and device-code grants are not implemented. No specific third-party client account was used to test its connection UI.
 
 ## Tools
 

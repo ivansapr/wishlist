@@ -1,2 +1,3 @@
+import { redirect } from '@sveltejs/kit';
 import { folders,items } from '#lib/server/store';
-export function load({locals}:{locals:App.Locals}) {const a=locals.user?{userId:locals.user.id,write:true,folderId:null}:null;const list=a?items(a):[];return {user:locals.user||null,folders:a?folders(a):[],items:list,hasMore:list.length===100};}
+export function load({locals,url}:{locals:App.Locals;url:URL}) {const candidate=url.searchParams.get('oauth_request');const oauthRequest=candidate&&/^[A-Za-z0-9_-]{43}$/.test(candidate)?candidate:null;if(locals.user&&oauthRequest)redirect(303,'/oauth/authorize?request='+encodeURIComponent(oauthRequest));const a=locals.user?{userId:locals.user.id,write:true,folderId:null}:null;const list=a?items(a):[];return {oauthRequest,user:locals.user||null,folders:a?folders(a):[],items:list,hasMore:list.length===100};}

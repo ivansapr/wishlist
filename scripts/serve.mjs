@@ -12,6 +12,10 @@ process.env.HOST_HEADER='x-wishlist-host';
 process.env.BODY_SIZE_LIMIT||='6M';
 const { handler }=await import('../build/handler.js');
 const server=createServer((request,response)=>{
+ // These cookie-independent protocol endpoints accept form POSTs from OAuth clients.
+ // Normalize their Origin for SvelteKit’s form CSRF gate; browser account/consent
+ // routes retain the original Origin and their normal protections.
+ if(request.method==='POST'&&/^\/oauth\/(token|register|revoke)$/.test(new URL(request.url,origin).pathname))request.headers.origin=origin.origin;
  request.headers['x-wishlist-protocol']=origin.protocol.slice(0,-1);
  request.headers['x-wishlist-host']=origin.host;
  handler(request,response);

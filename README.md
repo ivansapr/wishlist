@@ -46,13 +46,17 @@ ORIGIN=http://localhost:3000 RP_ID=localhost npm start
 - Item editing, folder moves, private notes, public descriptions and recoverable trash.
 - Sourced, dated price observations, currency-aware price labels and price history.
 - Revocable and replaceable public view-only folder links, including revocation of image access.
-- Bearer-authenticated Streamable HTTP MCP with read-only/read-write and optional folder scope.
+- OAuth authorization-code/PKCE and personal-token authentication for Streamable HTTP MCP, with read-only/read-write and optional folder scope.
 - Revision checks, transactional item/initial-price saves and idempotency keys for retryable creates and price records.
 - SQLite WAL, ownership foreign keys, consistent online backups and a restore-integrity checker.
 
 ## Connect an assistant
 
-Open **Connect AI**, choose a name, permission level and folder scope, and create a token. Copy it immediately; only its hash is retained.
+Add `https://wishlist.example.com/mcp` to an OAuth-capable MCP client. The client discovers this server, registers itself, and opens Wishlist for sign-in and consent. Choose read-only or edit access and optionally limit it to one folder. Review the displayed return address before allowing the connection. Revoke access under **Connect AI → OAuth connections**.
+
+No additional environment variables or global OAuth client secret are needed. Set your public HTTPS `ORIGIN` correctly; keep it stable. New OAuth tables are added automatically to existing SQLite databases, preserving accounts, items and personal tokens. Back up before upgrading.
+
+For clients using a manually configured bearer header, open **Connect AI**, choose a name, permission level and folder scope, and create a personal token. Copy it immediately; only its hash is retained.
 
 Configure a remote MCP client that supports bearer headers:
 
@@ -69,7 +73,7 @@ Configure a remote MCP client that supports bearer headers:
 }
 ```
 
-Exact configuration syntax depends on the client. This release does not implement OAuth discovery/authorization and does not claim compatibility with OAuth-only clients. See [MCP details](docs/MCP.md).
+Exact configuration syntax depends on the client. OAuth is tested with the official MCP SDK; individual client UIs and configuration syntax vary. OAuth client-metadata-document URLs, OpenID Connect and non-code grants are not supported. See [MCP details](docs/MCP.md).
 
 Try: “Save a ceramic coffee cup in my wishlist. Make a transparent postage-stamp illustration, upload it, and record the price with the shop link and observation time.”
 
@@ -82,7 +86,7 @@ npm test
 npm run test:browser
 ```
 
-Integration tests start a production server on port 4173 with an isolated temporary database. Browser checks use Chromium (`/usr/bin/chromium` by default; set `CHROMIUM_PATH` to another executable), port 4174, and temporary accounts. They include real WebAuthn challenge/signature verification through a virtual authenticator. Screenshots go to ignored `work/screenshots/`. `npm run test:docker` exercises the locally built `wishlist:local` image with a disposable container/volume and confirms restart persistence and backup integrity.
+Integration tests start isolated production servers on ports 4173 and 4175 with temporary databases. Browser checks use Chromium (`/usr/bin/chromium` by default; set `CHROMIUM_PATH` to another executable), port 4174, and temporary accounts. They include real WebAuthn challenge/signature verification through a virtual authenticator, plus OAuth sign-in continuation, consent, token exchange and UI revocation. The API suite checks OAuth discovery and SDK interoperability, PKCE, client authentication, refresh rotation/replay detection, scope isolation and migration from schema version one. Screenshots go to ignored `work/screenshots/`. `npm run test:docker` exercises the locally built `wishlist:local` image with a disposable container/volume and confirms item/artwork persistence, OAuth refresh after restart, and backup integrity.
 
 ## Backup and restore
 

@@ -1,7 +1,7 @@
 # Wishlist — product specification and design
 
 Status: original design specification, 1 November 2026. Repository: ivansapr/wishlist.
-Implementation has started. See README.md for current capabilities and boundaries; recovery codes, OAuth and free dragging remain future work.
+Implementation has started. See README.md for current capabilities and boundaries; recovery codes and free dragging remain future work. MCP OAuth authorization code flow with PKCE is implemented; see docs/MCP.md.
 
 ## Product
 A personal scrapbook of things worth saving. People collect items into folders, connect an AI through MCP, and share a folder with a public, view-only link. The AI researches products, generates images, finds deals and records prices. The application stores and presents those results; it has no search engine, scraper, image-generation service or scheduled price checker.
@@ -41,7 +41,7 @@ Create and rename folders through small dialogs. Share dialog starts at Private.
 ### Account and connection
 Registration and login support email/password or passkeys. Profile contains display name, email, preferred currency, password management, registered passkeys, sessions and AI connections. Account recovery needs a concrete deployment policy before implementation; proposed recovery codes and enrollment of a second passkey. Do not promise email delivery until SMTP is configured. Passkeys require HTTPS in production and stable relying-party domain. Default currency is a preference, not conversion.
 
-Connect AI shows the MCP endpoint, connection instructions, permission choices, and revocation. Proposed version-one authentication uses revocable scoped tokens for clients supporting bearer-token setup; document compatibility per target client. If the target client requires OAuth discovery/authorization, implement that before claiming compatibility. Token secrets are shown once and stored hashed. Profile never exposes secrets again.
+Connect AI shows the MCP endpoint, connection instructions, permission choices, and revocation. Proposed version-one authentication uses revocable scoped tokens for clients supporting bearer-token setup; document compatibility per target client. If the target client requires OAuth discovery/authorization, use the implemented authorization-code/PKCE flow described in docs/MCP.md. Token secrets are shown once and stored hashed. Profile never exposes secrets again.
 
 ## Design system
 Canvas #F4F0E8; paper #FFFCF6; ink #25231F; muted text #68635B; border #C9C2B7. These are warm neutrals only. Serif heading and title stack: Georgia, Times New Roman, serif. Controls and metadata: system-ui, sans-serif. Heading 44px desktop / 32px mobile; item title 18–22px; body 16px; controls 14px. Thin rules, restrained paper shadows, no gradients or decorative interface illustrations. Focus uses a clearly visible dark outline. Controls always have words; essential actions never require hover.
