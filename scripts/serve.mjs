@@ -9,7 +9,7 @@ if(!['http:','https:'].includes(origin.protocol)||origin.origin!==(process.env.O
 process.env.ORIGIN=origin.origin;
 process.env.PROTOCOL_HEADER='x-wishlist-protocol';
 process.env.HOST_HEADER='x-wishlist-host';
-process.env.BODY_SIZE_LIMIT||='6M';
+process.env.BODY_SIZE_LIMIT||='8M';
 const { handler }=await import('../build/handler.js');
 const server=createServer((request,response)=>{
  // These cookie-independent protocol endpoints accept form POSTs from OAuth clients.
@@ -25,3 +25,4 @@ for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{
  server.close(()=>process.exit(0));
  setTimeout(()=>process.exit(1),10000).unref();
 });
+
