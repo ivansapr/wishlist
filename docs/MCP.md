@@ -43,20 +43,23 @@ Tested with the official MCP SDK for discovery, dynamic registration, exchange, 
 | `delete_item`, `restore_item` | Soft delete or restore an item |
 | `list_price_observations` | Read dated observations |
 | `record_price_observation` | Store a sourced price, optional deal/expiry/shipping and idempotency key |
-| `prepare_asset_upload` | Return binary upload instructions |
+| `upload_asset` | Upload PNG/WebP bytes as base64 through the authenticated MCP connection |
+| `prepare_asset_upload` | Return optional binary HTTP upload instructions |
 | `attach_item_asset` | Attach an owned uploaded asset using current item revision |
 
 Sharing settings, credentials and connection management are web-only.
 
 ## Images
 
-The assistant generates its own image in the item's selected style (`stamp`, `sticker`, `object`). Ask for a transparent background and no price/title text baked into the pixels. Keep recognizable product details; do not present artistic artwork as a verified product photograph.
+Use original product photos when requested. Crops, background removal and borders can provide different preview styles while preserving the product. Generate artwork only when appropriate; do not present illustrations as verified photographs.
 
-1. Call `prepare_asset_upload`.
-2. POST PNG or WebP bytes to the returned `/api/upload` URL with the same bearer token and matching Content-Type. Maximum upload is 5 MiB, decoded pixel budget 16,777,216; animated inputs are flattened. Output is resized within 1600 × 1600 and re-encoded to WebP.
+1. Encode a local PNG or WebP as standard base64 (no data URL prefix).
+2. Call `upload_asset` with `content_type` (`image/png` or `image/webp`) and `image_base64`. It uses the MCP connection's existing authentication; the assistant does not need access to its bearer token.
 3. Read the returned asset `id` and use `attach_item_asset` with the item's latest revision.
 
-No URL fetching or server image-generation keys are needed. A client needs a binary HTTP upload capability in addition to MCP. The server stores the previous art until the replacement is attached successfully.
+Maximum decoded upload is 5 MiB, decoded pixel budget 16,777,216; animated inputs are flattened. Output is resized within 1600 × 1600 and re-encoded to WebP. The MCP JSON body limit and default HTTP body limit are 8 MiB to accommodate base64 overhead. Deployments overriding `BODY_SIZE_LIMIT` or reverse-proxy limits must allow at least 8 MiB for `/mcp`.
+
+Clients with authenticated binary HTTP capability can still call `prepare_asset_upload` and POST image bytes to `/api/upload` with the same bearer token and matching Content-Type. No URL fetching or server image-generation keys are needed. Both upload paths enforce write permission, ownership, validation and rate limits. Existing artwork remains until a replacement is attached successfully.
 
 ## Prices and retry behavior
 
@@ -67,3 +70,4 @@ Displayed price is the newest observation whose deal has not expired. History ke
 Use a unique `idempotency_key` for each logical create or price record. Retry with the same key and the same fields to receive the original response. Reusing a key for another payload or folder scope yields a conflict. Item updates and deletes require `revision`; a stale revision returns a conflict rather than overwriting someone else's edit. Fetch the current item before resolving it.
 
 Errors returned by tools include `isError` and a JSON error/status; HTTP authentication failures use 401/403. Standard SDK initialization, tool discovery and tool calls are supported. Persistent server notification streams are not provided.
+

@@ -5,12 +5,13 @@ import { mkdtemp,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { randomBytes } from 'node:crypto';
 let server:ChildProcess,dir:string;
 const origin='http://localhost:4173';
 let serverLog='';
 type Client={cookie:string;token?:string};
 async function request(client:Client,path:string,method='GET',body?:unknown,expected=200,extra:Record<string,string>={}){const response=await fetch(origin+path,{method,headers:{Origin:origin,...client.cookie?{Cookie:client.cookie}:{},...client.token?{Authorization:'Bearer '+client.token}:{},...body?{'Content-Type':'application/json'}:{},...extra},body:body?JSON.stringify(body):undefined});const cookie=response.headers.get('set-cookie');if(cookie?.startsWith('session='))client.cookie=cookie.split(';')[0];const data=await response.json().catch(()=>null);assert.equal(response.status,expected,JSON.stringify(data));return data;}
-before(async()=>{dir=await mkdtemp(join(tmpdir(),'wishlist-test-'));server=spawn(process.execPath,['scripts/serve.mjs'],{env:{...process.env,PORT:'4173',ORIGIN:origin,DATA_DIR:dir,BODY_SIZE_LIMIT:'6M'},stdio:['ignore','pipe','pipe']});server.stdout?.on('data',v=>serverLog+=v);server.stderr?.on('data',v=>serverLog+=v);for(let i=0;i<80;i++){try{if((await fetch(origin+'/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error(serverLog);});
+before(async()=>{dir=await mkdtemp(join(tmpdir(),'wishlist-test-'));server=spawn(process.execPath,['scripts/serve.mjs'],{env:{...process.env,PORT:'4173',ORIGIN:origin,DATA_DIR:dir,BODY_SIZE_LIMIT:'8M'},stdio:['ignore','pipe','pipe']});server.stdout?.on('data',v=>serverLog+=v);server.stderr?.on('data',v=>serverLog+=v);for(let i=0;i<80;i++){try{if((await fetch(origin+'/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error(serverLog);});
 after(async()=>{server?.kill();await new Promise(r=>setTimeout(r,100));await rm(dir,{recursive:true,force:true});});
 test('accounts, scoped mutations, sharing, binary assets, price history and MCP',async()=>{
  const alice:Client={cookie:''},bob:Client={cookie:''},anonymous:Client={cookie:''};
@@ -53,12 +54,28 @@ test('accounts, scoped mutations, sharing, binary assets, price history and MCP'
  const rpc=async(client:Client,method:string,params:unknown,id=1)=>request(client,'/mcp','POST',{jsonrpc:'2.0',id,method,params},200,{Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-03-26'});
  const initialized=await rpc(reader,'initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'test',version:'1'}});assert.equal(initialized.result.serverInfo.name,'wishlist');
  const tools=await rpc(reader,'tools/list',{});assert(tools.result.tools.some((t:any)=>t.name==='record_price_observation'));
+ assert(tools.result.tools.some((t:any)=>t.name==='upload_asset'&&!t.annotations.readOnlyHint));
+ const uploadArgs={content_type:'image/png',image_base64:image.toString('base64')};
+ const uploadDenied=await rpc(reader,'tools/call',{name:'upload_asset',arguments:uploadArgs});assert.equal(JSON.parse(uploadDenied.result.content[0].text).status,403);
+ for(const invalid of ['data:image/png;base64,'+uploadArgs.image_base64,'!!!!','AAAA=AAA','AB==',Buffer.from('not an image').toString('base64')]){
+  const rejected=await rpc(writer,'tools/call',{name:'upload_asset',arguments:{...uploadArgs,image_base64:invalid}});assert.equal(rejected.result.isError,true);
+ }
+ const mcpUpload=await rpc(writer,'tools/call',{name:'upload_asset',arguments:uploadArgs});assert(!mcpUpload.result.isError,JSON.stringify(mcpUpload));const mcpAsset=JSON.parse(mcpUpload.result.content[0].text);
+ assert.equal((await fetch(origin+'/assets/'+mcpAsset.id,{headers:{Cookie:bob.cookie}})).status,404);
+ const beforeAttach=(await request(alice,'/api/state')).items.find((i:any)=>i.id===item.id);
+ const attached=await rpc(writer,'tools/call',{name:'attach_item_asset',arguments:{id:item.id,revision:beforeAttach.revision,asset_id:mcpAsset.id}});assert(!attached.result.isError,JSON.stringify(attached));
+ const stale=await rpc(writer,'tools/call',{name:'attach_item_asset',arguments:{id:item.id,revision:beforeAttach.revision,asset_id:asset.id}});assert.equal(JSON.parse(stale.result.content[0].text).status,409);
+ const foreign=await request(bob,'/api/items','POST',{folder_id:(await request(bob,'/api/state')).folders[0].id,title:'Bob item'});
+ await request(bob,'/api/items/'+foreign.id,'PATCH',{revision:foreign.revision,asset_id:mcpAsset.id},404);
+ // Base64 payloads above the previous 1 MiB transport cap must reach image validation.
+ const large=await sharp(randomBytes(600*600*4),{raw:{width:600,height:600,channels:4}}).png().toBuffer();assert(large.toString('base64').length>1024*1024);
+ const largeUpload=await rpc(writer,'tools/call',{name:'upload_asset',arguments:{...uploadArgs,image_base64:large.toString('base64')}});assert(!largeUpload.result.isError,JSON.stringify(largeUpload));
  const call=await rpc(reader,'tools/call',{name:'list_items',arguments:{}});const listed=JSON.parse(call.result.content[0].text);assert.equal(listed.length,1);assert.equal(listed[0].prices.length,1);
  const denied=await rpc(reader,'tools/call',{name:'create_item',arguments:{folder_id:folder,title:'Denied'}});assert.equal(denied.result.isError,true);
  const result=await rpc(writer,'tools/call',{name:'create_item',arguments:{folder_id:folder,title:'Via MCP',idempotency_key:'mcp-item'}});assert(!result.result.isError,JSON.stringify(result));
  const again=await rpc(writer,'tools/call',{name:'create_item',arguments:{folder_id:folder,title:'Via MCP',idempotency_key:'mcp-item'}});assert.equal(JSON.parse(result.result.content[0].text).id,JSON.parse(again.result.content[0].text).id);
  const connections=await request(alice,'/api/profile');const tid=connections.tokens.find((t:any)=>t.name==='Read only').id;await request(alice,'/api/tokens/'+tid,'DELETE');await request(reader,'/api/state','GET',undefined,401);
- await request(alice,'/api/items/'+item.id+'?revision=3','DELETE');assert.equal((await request(alice,'/api/trash')).length,1);await request(alice,'/api/items/'+item.id+'/restore','POST',{});
+ await request(alice,'/api/items/'+item.id+'?revision=4','DELETE');assert.equal((await request(alice,'/api/trash')).length,1);await request(alice,'/api/items/'+item.id+'/restore','POST',{});
  const csrf=await fetch(origin+'/api/folders',{method:'POST',headers:{Origin:'https://evil.example',Cookie:alice.cookie,'Content-Type':'application/json'},body:JSON.stringify({name:'bad'})});assert.equal(csrf.status,403);
  await request(anonymous,'/api/auth/login','POST',{email:'alice@example.test',password:'wrong'},401);
  await request(anonymous,'/api/auth/login','POST',{email:'alice@example.test',password:'a long test password'});
@@ -68,3 +85,4 @@ test('accounts, scoped mutations, sharing, binary assets, price history and MCP'
  const child=spawn(process.execPath,['scripts/backup.mjs',backupDir],{env:{...process.env,DATA_DIR:dir},stdio:'pipe'});let logs='';child.stderr.on('data',v=>logs+=v);const exit=await new Promise(r=>child.on('exit',r));assert.equal(exit,0,logs);
  const check=spawn(process.execPath,['scripts/restore-check.mjs',backupDir],{stdio:'pipe'});assert.equal(await new Promise(r=>check.on('exit',r)),0);await rm(backupDir,{recursive:true,force:true});
 });
+
